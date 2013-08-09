@@ -1,5 +1,4 @@
-import pathfollowing as pf
-import numpy as np
+from pathfollowing import *
 from casadi import *
 
 # System parameters
@@ -11,7 +10,7 @@ c1, c2 = 2., 1.
 g = 9.81
 
 # Define flat system
-S = pf.FlatSystem(2, 2)
+S = FlatSystem(2, 2)
 y = S.y
 
 q1 = S.set_state(y[0, 0], 'q1')
@@ -30,12 +29,13 @@ tau1 = S.set_state(d11 * ddq1 + d12 * ddq2 + c1 * dq1 + 2 * c * dq1 * dq2 + c * 
 tau2 = S.set_state(d12 * ddq1 + d22 * ddq2 - c * dq1 ** 2 + g2 + c2 * dq2, 'tau2')
 
 # Path following problem
-P = pf.PathFollowing(S)
+P = PathFollowing(S)
 s = P.s[0]
 s = s ** 2 * (s + 3 * (1 - s))
 path = [0.5 * np.pi * s, -np.pi * s]
 P.set_path(path)
 P.set_constraint('tau1', -20, 20)
 P.set_constraint('tau2', -10, 10)
-P.set_options({'Nt': 199, 'N': 199, 'tol': 1e-8, 'reg': 0, 'bc': True})
+P.set_options({'Nt': 199, 'N': 199, 'reg': 0})
 P.solve()
+P.plot([['tau1', 'tau2']])

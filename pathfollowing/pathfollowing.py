@@ -40,8 +40,7 @@ Dependencies:
 import casadi as cas
 import numpy as np
 import warnings
-# from scipy.misc import factorial, comb
-# from splines import BSplineBasis
+from scipy.misc import factorial
 
 
 def evalf(fun, x):
@@ -179,8 +178,7 @@ class PathFollowing(object):
         self.objective = {'Lagrange': [], 'Mayer': []}
         self.options = {
             'N': 199, 'Nt': 499, 'solver': 'Ipopt', 'tol': 1e-6,
-            'max_iter': 100, 'generate_hessian': True, 'method': 'b',
-            'plot': True, 'reg': 1e-20, 'bc': False
+            'max_iter': 100, 'plot': True, 'reg': 1e-20, 'bc': False
             }
         self.sol = {
             's': [], 't': [], 'states': [], 'inputs': [], 'diagnostics': 0
@@ -345,6 +343,7 @@ class PathFollowing(object):
         be used to examine the solution.
 
         TODO: Add support for other solvers
+        TODO: version bump
         """
         if not self.prob['s']:
             self.set_grid()
@@ -354,13 +353,19 @@ class PathFollowing(object):
         self.prob['solver'] = None
         N = self.options['N']
         self.prob['vars'] = [cas.ssym("b", N + 1, self.sys.order)]
+        # self.prob['vars'] = [cas.MX("b", N + 1, self.sys.order)]
         V = cas.vec(self.prob['vars'][0])
         self._make_objective()
         self._make_constraints()
+
+        # nlp = cas.SXFunction(cas.nlpIn(x=[V]),
+        #                     cas.nlpOut(f=self.prob['obj'], g=self.prob['con'][0]))
+
         con = cas.SXFunction([V], [self.prob['con'][0]])
         obj = cas.SXFunction([V], [self.prob['obj']])
         if self.options.get('solver') == 'Ipopt':
             solver = cas.IpoptSolver(obj, con)
+            # solver = cas.IpoptSolver(nlp)
         else:
             print """Other solver than Ipopt are currently not supported,
             switching to Ipopt"""
@@ -370,11 +375,17 @@ class PathFollowing(object):
                 solver.setOption(option, value)
         solver.init()
         # Setting constraints
-        solver.setInput(cas.vertcat(self.prob['con'][1]), cas.NLP_LBG)
-        solver.setInput(cas.vertcat(self.prob['con'][2]), cas.NLP_UBG)
-        solver.setInput([np.inf] * self.sys.order * (N + 1), cas.NLP_UBX)
+        solver.setInput(cas.vertcat(self.prob['con'][1]), "lbg")
+        solver.setInput(cas.vertcat(self.prob['con'][2]), "ubg")
+        solver.setInput([np.inf] * self.sys.order * (N + 1), "ubx")
         solver.setInput(cas.vertcat(([0] * (N + 1),
-                    (self.sys.order - 1) * (N + 1) * [-np.inf])), cas.NLP_LBX)
+                    (self.sys.order - 1) * (N + 1) * [-np.inf])), "lbx")
+
+        # solver.setInput(cas.vertcat(self.prob['con'][1]), cas.NLP_LBG)
+        # solver.setInput(cas.vertcat(self.prob['con'][2]), cas.NLP_UBG)
+        # solver.setInput([np.inf] * self.sys.order * (N + 1), cas.NLP_UBX)
+        # solver.setInput(cas.vertcat(([0] * (N + 1),
+        #             (self.sys.order - 1) * (N + 1) * [-np.inf])), cas.NLP_LBX)
         solver.solve()
         self.prob['solver'] = solver
         self._get_solution()
@@ -520,7 +531,7 @@ class PathFollowing(object):
         """
         solver = self.prob['solver']
         N = self.options['N']
-        x_opt = np.array(solver.output(cas.NLP_X_OPT)).ravel()
+        x_opt = np.array(solver.getOutput("x")).ravel()
         delta = np.diff(self.prob['s'])
         b_opt = np.reshape(x_opt, (N + 1, -1), order='F')
         time = np.cumsum(np.hstack([0, 2 * delta / (np.sqrt(b_opt[:-1, 0]) +
