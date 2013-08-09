@@ -353,19 +353,14 @@ class PathFollowing(object):
         self.prob['solver'] = None
         N = self.options['N']
         self.prob['vars'] = [cas.ssym("b", N + 1, self.sys.order)]
-        # self.prob['vars'] = [cas.MX("b", N + 1, self.sys.order)]
         V = cas.vec(self.prob['vars'][0])
         self._make_objective()
         self._make_constraints()
-
-        # nlp = cas.SXFunction(cas.nlpIn(x=[V]),
-        #                     cas.nlpOut(f=self.prob['obj'], g=self.prob['con'][0]))
 
         con = cas.SXFunction([V], [self.prob['con'][0]])
         obj = cas.SXFunction([V], [self.prob['obj']])
         if self.options.get('solver') == 'Ipopt':
             solver = cas.IpoptSolver(obj, con)
-            # solver = cas.IpoptSolver(nlp)
         else:
             print """Other solver than Ipopt are currently not supported,
             switching to Ipopt"""
@@ -381,11 +376,6 @@ class PathFollowing(object):
         solver.setInput(cas.vertcat(([0] * (N + 1),
                     (self.sys.order - 1) * (N + 1) * [-np.inf])), "lbx")
 
-        # solver.setInput(cas.vertcat(self.prob['con'][1]), cas.NLP_LBG)
-        # solver.setInput(cas.vertcat(self.prob['con'][2]), cas.NLP_UBG)
-        # solver.setInput([np.inf] * self.sys.order * (N + 1), cas.NLP_UBX)
-        # solver.setInput(cas.vertcat(([0] * (N + 1),
-        #             (self.sys.order - 1) * (N + 1) * [-np.inf])), cas.NLP_LBX)
         solver.solve()
         self.prob['solver'] = solver
         self._get_solution()
@@ -401,7 +391,6 @@ class PathFollowing(object):
         con = self._ode(self.prob['vars'][0])
         lb = np.alen(con) * [0]
         ub = np.alen(con) * [0]
-        # S = np.arange(0, 1, 1.0/(N+1))
         S = self.prob['s']
         b = self.prob['vars'][0]
         path, bs = self._make_path()[0:2]
@@ -572,9 +561,6 @@ class PathFollowing(object):
 
             show (boolean): When True the plot is shown by invoking show()
               from matplotlib (default True)
-
-        Returns:
-            plt
         """
         import matplotlib.pyplot as plt
         for plots in p:
@@ -655,7 +641,6 @@ class PathFollowing(object):
             tsave('_'.join(p[0]) + '.tikz')
         if show:
             plt.show()
-        return plt
 
     def save(self, filename):
         """
