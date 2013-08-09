@@ -1,8 +1,6 @@
 from pathfollowing import *
 from casadi import *
 from numpy import pi
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 
 G = 9.81
 m = 1.35
