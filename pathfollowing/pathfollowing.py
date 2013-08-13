@@ -5,7 +5,7 @@
 # modify it under the terms of the GNU Lesser General Public
 # License as published by the Free Software Foundation; either
 # version 3 of the License, or (at your option) any later version.
-# CasADi is distributed in the hope that it will be useful,
+# This software is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
 # Lesser General Public License for more details.
@@ -517,23 +517,31 @@ class PathFollowing(object):
             * 'states': Numerical values of the states defined in self.sys
 
         TODO: perform accurate integration to determine time
+        TODO: Do exact interpolation
         """
         solver = self.prob['solver']
         N = self.options['N']
         x_opt = np.array(solver.getOutput("x")).ravel()
-        delta = np.diff(self.prob['s'])
         b_opt = np.reshape(x_opt, (N + 1, -1), order='F')
-        time = np.cumsum(np.hstack([0, 2 * delta / (np.sqrt(b_opt[:-1, 0]) +
-                                                 np.sqrt(b_opt[1:, 0]))]))
+
+        # Determine time on a sufficiently fine spatial grid
+        s0 = np.linspace(0, 1, 5001)
+        delta = s0[1] - s0[0]
+        b0_opt = np.hstack([self._eval_b(b_opt, s)[0] for s in s0])
+        time = np.cumsum(np.hstack([0, 2 * delta / (np.sqrt(b0_opt[:-1]) +
+                                                 np.sqrt(b0_opt[1:]))]))
         # Resample to constant time-grid
         t = np.linspace(time[0], time[-1], self.options['Nt'])
-        b_opt = np.array([np.interp(t, time, b) for b in b_opt.T]).T
-        # Get s and derivatives from b_opt
-        s = np.matrix(np.interp(t, time, self.prob['s']))
+        st = np.interp(t, time, s0)
+        # Evaluate solution on equidistant time grid
+        b_opt = np.vstack([self._eval_b(b_opt, s) for s in st])
+        st = np.matrix(st)
+
+        # Determine s and derivatives from b_opt
         b, Ds = self._make_path()[1:]
         Ds_f = cas.SXFunction([b], [Ds])  # derivatives of s wrt b
         Ds_f.init()
-        s_opt = np.hstack((s.T, np.array([evalf(Ds_f, bb).toArray().ravel()
+        s_opt = np.hstack((st.T, np.array([evalf(Ds_f, bb).toArray().ravel()
                                           for bb in b_opt])))
         self.sol['s'] = s_opt
         self.sol['t'] = t
@@ -543,6 +551,13 @@ class PathFollowing(object):
         f_val = np.array([evalf(f, s.T).toArray().ravel() for s in s_opt])
         self.sol['states'] = dict([(k, f_val[:, i]) for i, k in
                           enumerate(self.sys.x.keys())])
+
+    def _eval_b(self, b, s):
+        """Evaluate b and its derivatives at an arbitrary point s"""
+        bi = lambda s, s0, b: sum([b[i] * (s - s0) ** (i) / factorial(i) for i in range(len(b))])
+        for i in range(self.options['N']):
+            if self.prob['s'][i] <= s <= self.prob['s'][i + 1]:
+                return np.flipud([bi(s, self.prob['s'][i], b[i, j:]) for j in range(self.sys.order - 1, -1, -1)])
 
     def plot(self, p=[['states'], ['constraints']], tikz=False, show=True):
         """Plot states and/or constraints.

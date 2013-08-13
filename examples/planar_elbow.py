@@ -36,6 +36,6 @@ path = [0.5 * np.pi * s, -np.pi * s]
 P.set_path(path)
 P.set_constraint('tau1', -20, 20)
 P.set_constraint('tau2', -10, 10)
-P.set_options({'Nt': 199, 'N': 199, 'reg': 0})
+P.set_options({'Nt': 199, 'N': 299, 'reg': 0})
 P.solve()
 P.plot([['tau1', 'tau2']])
