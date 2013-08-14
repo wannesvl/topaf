@@ -33,7 +33,7 @@ y. For example, the j-th derivative of flat output i of system S
 is `S.y[i, j]`. The instance method `set_state` allows to express the state
 x of the system S as a function of the flat outputs:
 
-    x = S.set_state(expr, name=None)
+    x = S.set_state(expr[, name=None])
 
 Optionally, the state can be given a name. The computation of time
 derivatives is facilitated with the instance method `dt`:
@@ -83,12 +83,12 @@ solver options are set through
 Aside from all supported options of IPOPT in CasADi, the following
 options are available
 
--   `N`: The number of discretization steps
+-   `N`: The number of discretization steps (default: 199)
 
--   `Nt`: The number of returned time points in the solution
+-   `Ts`: The sampling frequency, used when transforming the solution back to time (default: 0.01 s).
 
 -   `reg`: A regularization factor added to the goal function to avoid
-    singular arcs in the solution
+    singular arcs in the solution (default: 1e-20)
 
 Finally, the instance method
 

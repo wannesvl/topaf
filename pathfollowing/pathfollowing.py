@@ -177,7 +177,7 @@ class PathFollowing(object):
         self.constraints = []
         self.objective = {'Lagrange': [], 'Mayer': []}
         self.options = {
-            'N': 199, 'Nt': 499, 'solver': 'Ipopt', 'tol': 1e-6,
+            'N': 199, 'Ts': 0.01, 'solver': 'Ipopt', 'tol': 1e-6,
             'max_iter': 100, 'plot': True, 'reg': 1e-20, 'bc': False
             }
         self.sol = {
@@ -531,7 +531,8 @@ class PathFollowing(object):
         time = np.cumsum(np.hstack([0, 2 * delta / (np.sqrt(b0_opt[:-1]) +
                                                  np.sqrt(b0_opt[1:]))]))
         # Resample to constant time-grid
-        t = np.linspace(time[0], time[-1], self.options['Nt'])
+        t = np.arange(time[0], time[-1], self.options['Ts'])
+        # t = np.linspace(time[0], time[-1], self.options['Nt'])
         st = np.interp(t, time, s0)
         # Evaluate solution on equidistant time grid
         b_opt = np.vstack([self._eval_b(b_opt, s) for s in st])
