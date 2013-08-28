@@ -66,10 +66,11 @@ created via
 The symbolic path coordinate and its time derivatives are stored in the
 instance attribute `s`. The reference path is set by the instance method
 
-    set_path(expr)
+    set_path(expr[, r2r=False])
 
-where `expr` is a list in which each component of the flat output is
-expressed as a function of `s[0]`.
+where `expr` is a list in which each component of the flat output is expressed as
+a function of `s[0]`. When `r2r` is set `True`, the path is reparameterized such
+that a rest-to-rest transition is performed.
 
 Inequality constraints are set using the instance method
 
