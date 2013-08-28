@@ -25,11 +25,9 @@ u3 = Q.set_state(Jz * Q.dt(wz) + (Jy - Jx) * wx * wy, 'u3')
 
 # Path tracking problem
 P = PathFollowing(Q)
-s = P.s[0]
-alpha = 0.5
-ps = 2 * pi * s ** 4 * (35 - 84 * s + 70 * s ** 2 - 20 * s ** 3)
-path = [cos(ps), sin(ps), -(0.9 * (exp(ps / 2 / pi)-1) + 0.1 * sin(ps)) ** 2, ps]
-P.set_path(path)
+s = 2 * pi * P.s[0]
+path = [cos(s), sin(s), -(0.9 * (exp(s / 2 / pi)-1) + 0.1 * sin(s)) ** 2, s]
+P.set_path(path, r2r=True)
 P.set_constraint('u1', -8, 8)
 P.set_constraint('u2', -8, 8)
 P.set_constraint('u3', -8, 8)

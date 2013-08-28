@@ -40,7 +40,7 @@ Dependencies:
 import casadi as cas
 import numpy as np
 import warnings
-from scipy.misc import factorial
+from scipy.misc import factorial, comb
 
 
 def evalf(fun, x):
@@ -196,7 +196,7 @@ class PathFollowing(object):
     # ========================================================================
     # Problem definition
     # ========================================================================
-    def set_path(self, path):
+    def set_path(self, path, r2r=False):
         """Define an analytic expression of the geometric path.
 
         Note: The path must be defined as a function of self.s[0].
@@ -204,6 +204,8 @@ class PathFollowing(object):
         Args:
             path (list of SXMatrix): An expression of the geometric path as
                 a function of self.s[0]. Its dimension must equal self.sys.ny
+            r2r (boolean): Reparameterize path such that a rest to rest
+                transition is performed
 
         Example:
             >>> S = FlatSystem(2, 4)
@@ -212,10 +214,22 @@ class PathFollowing(object):
         """
         if isinstance(path, list):
             path = cas.vertcat(path)
+        if r2r:
+            path = cas.substitute(path, self.s[0], self._r2r())
         self.path[:, 0] = path
         dot_s = cas.vertcat([self.s[1:], 0])
         for i in range(1, self.sys.order + 1):
             self.path[:, i] = cas.mul(cas.jacobian(self.path[:, i - 1], self.s), dot_s)
+
+    def _r2r(self):
+        """Reparameterization such that the path defines a rest to rest
+        transition"""
+        degree = 2 * self.sys.order - 1
+        bernstein_coeffs = np.hstack((
+            [round(comb(degree, i)) for i in range((degree + 1) / 2)],
+            [0] * ((degree - 1) / 2),
+            0))
+        return sum([bernstein_coeffs[i] * self.s[0] ** (degree - i) * (1 - self.s[0]) ** i for i in range(degree + 1)])
 
     def set_options(self, options):
         """Update dictionary of options
@@ -302,8 +316,10 @@ class PathFollowing(object):
         if grid is None:
             self.prob['s'] = np.linspace(0, 1, self.options['N'] + 1)
         else:
+            if grid[-1] != 1:
+                grid = np.append(grid, [1]) 
             self.prob['s'] = np.array(grid)
-            self.options['N'] = grid.size
+            self.options['N'] = grid.size - 1
 
     # ========================================================================
     # Problem solving
@@ -345,7 +361,7 @@ class PathFollowing(object):
         TODO: Add support for other solvers
         TODO: version bump
         """
-        if not self.prob['s']:
+        if len(self.prob['s']) == 0:
             self.set_grid()
         # Check feasibility
         self.check_ss_feasibility()
@@ -523,13 +539,16 @@ class PathFollowing(object):
         N = self.options['N']
         x_opt = np.array(solver.getOutput("x")).ravel()
         b_opt = np.reshape(x_opt, (N + 1, -1), order='F')
-
+        self.sol['b'] = b_opt
+        
         # Determine time on a sufficiently fine spatial grid
-        s0 = np.linspace(0, 1, 5001)
+        s0 = np.linspace(0, 1, 1001)
         delta = s0[1] - s0[0]
         b0_opt = np.hstack([self._eval_b(b_opt, s)[0] for s in s0])
+        b0_opt[b0_opt < 0] = 0
         time = np.cumsum(np.hstack([0, 2 * delta / (np.sqrt(b0_opt[:-1]) +
                                                  np.sqrt(b0_opt[1:]))]))
+        
         # Resample to constant time-grid
         t = np.arange(time[0], time[-1], self.options['Ts'])
         # t = np.linspace(time[0], time[-1], self.options['Nt'])
@@ -544,7 +563,7 @@ class PathFollowing(object):
         Ds_f.init()
         s_opt = np.hstack((st.T, np.array([evalf(Ds_f, bb).toArray().ravel()
                                           for bb in b_opt])))
-        self.sol['s'] = s_opt
+        self.sol['s'] = np.asarray(s_opt)
         self.sol['t'] = t
         # Evaluate the states
         f = cas.SXFunction([self.s], [cas.substitute(cas.vertcat(self.sys.x.values()),
@@ -559,6 +578,7 @@ class PathFollowing(object):
         for i in range(self.options['N']):
             if self.prob['s'][i] <= s <= self.prob['s'][i + 1]:
                 return np.flipud([bi(s, self.prob['s'][i], b[i, j:]) for j in range(self.sys.order - 1, -1, -1)])
+        return [0] * self.sys.order
 
     def plot(self, p=[['states'], ['constraints']], tikz=False, show=True):
         """Plot states and/or constraints.

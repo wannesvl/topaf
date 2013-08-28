@@ -31,9 +31,8 @@ tau2 = S.set_state(d12 * ddq1 + d22 * ddq2 - c * dq1 ** 2 + g2 + c2 * dq2, 'tau2
 # Path following problem
 P = PathFollowing(S)
 s = P.s[0]
-s = s ** 2 * (s + 3 * (1 - s))
 path = [0.5 * np.pi * s, -np.pi * s]
-P.set_path(path)
+P.set_path(path, r2r=True)
 P.set_constraint('tau1', -20, 20)
 P.set_constraint('tau2', -10, 10)
 P.set_options({'Ts': 0.01, 'N': 299, 'reg': 0})
