@@ -506,6 +506,7 @@ class PathFollowing(object):
         b = self.prob['vars'][0]
         # ds = 1.0/(N+1)
         obj = 2 * sum(np.diff(self.prob['s']) / (cas.sqrt(b[:N, 0]) + cas.sqrt(b[1:, 0])))
+        # reg = sum(cas.sqrt((b[1:, order - 1] - b[:N, order - 1]) ** 2))
         reg = sum((b[2:, order - 1] - 2 * b[1:N, order - 1] +
                     b[:(N - 1), order - 1]) ** 2)
         for f in self.objective['Lagrange']:
@@ -514,10 +515,19 @@ class PathFollowing(object):
             S = self.prob['s']
             b = self.prob['vars'][0]
             L = cas.substitute(f, self.sys.y, path)
-            L = sum(cas.vertcat([cas.substitute(L, cas.vertcat([self.s[0],
-                [bs[i] for i in range(0, bs.numel())]]),
-                cas.vertcat([S[j], [b[j, i] for i in range(0, self.sys.order)]]))
-                for j in range(0, N + 1)]))
+            L = 2 * sum(cas.vertcat([
+                        cas.substitute(
+                            L,
+                            cas.vertcat([self.s[0], bs]),
+                            cas.vertcat([S[j], b[j, :]])
+                        ) for j in range(1, N + 1)
+                        ])
+                    * np.diff(self.prob['s']) / (cas.sqrt(b[:N, 0]) + cas.sqrt(b[1:, 0]))
+                )
+            # L = sum(cas.vertcat([cas.substitute(L, cas.vertcat([self.s[0],
+            #     [bs[i] for i in range(0, bs.numel())]]),
+            #     cas.vertcat([S[j], [b[j, i] for i in range(0, self.sys.order)]]))
+            #     for j in range(0, N + 1)]))
             obj = obj + L
         self.prob['obj'] = obj + self.options['reg'] * reg
 
