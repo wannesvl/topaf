@@ -42,6 +42,7 @@ import numpy as np
 import warnings
 from scipy.misc import factorial, comb
 
+fact = factorial(range(20))
 
 def evalf(fun, x):
     '''Evaluate a CasADi function fun at the point x
@@ -219,7 +220,8 @@ class PathFollowing(object):
         self.path[:, 0] = path
         dot_s = cas.vertcat([self.s[1:], 0])
         for i in range(1, self.sys.order + 1):
-            self.path[:, i] = cas.mul(cas.jacobian(self.path[:, i - 1], self.s), dot_s)
+            self.path[:, i] = cas.mul(
+                cas.jacobian(self.path[:, i - 1], self.s), dot_s)
 
     def _r2r(self):
         """Reparameterization such that the path defines a rest to rest
@@ -229,7 +231,8 @@ class PathFollowing(object):
             [round(comb(degree, i)) for i in range((degree + 1) / 2)],
             [0] * ((degree - 1) / 2),
             0))
-        return sum([bernstein_coeffs[i] * self.s[0] ** (degree - i) * (1 - self.s[0]) ** i for i in range(degree + 1)])
+        return sum([bernstein_coeffs[i] * self.s[0] ** (degree - i) *
+                    (1 - self.s[0]) ** i for i in range(degree + 1)])
 
     def set_options(self, options):
         """Update dictionary of options
@@ -252,7 +255,7 @@ class PathFollowing(object):
         self.sys.y
 
         Args:
-            expr (str | SXMatrix): Name of the state or expression as a
+            expr (SXMatrix): Name of the state or expression as a
                 function of self.sys.y
 
             lb (double | SXMatrix): Lower bound for expr,
@@ -261,17 +264,15 @@ class PathFollowing(object):
             ub (double | SXMatrix): Lower bound for expr,
                 either as double of as a function of self.s[0]
 
+            pos (list of ints): s coordinates where constraint 
+                must be enforced
+
         Example:
             >>> S = FlatSystem(2, 4)
             >>> S.set_state(S.y[0,0], 'y0')
             >>> P = PathFollowing(S)
             >>> P.set_constraint('y0', -1, 1)
         """
-        if isinstance(expr, str):
-            if expr in self.sys.x:
-                expr = self.sys.x[expr]
-            else:
-                raise LookupError('No key %s in states or inputs' % expr)
         self.constraints.append((expr, lb, ub, pos))
 
     def empty_constraints(self):
@@ -317,7 +318,7 @@ class PathFollowing(object):
             self.prob['s'] = np.linspace(0, 1, self.options['N'] + 1)
         else:
             if grid[-1] != 1:
-                grid = np.append(grid, [1]) 
+                grid = np.append(grid, [1])
             self.prob['s'] = np.array(grid)
             self.options['N'] = grid.size - 1
 
@@ -364,12 +365,12 @@ class PathFollowing(object):
         if len(self.prob['s']) == 0:
             self.set_grid()
         # Check feasibility
-        self.check_ss_feasibility()
+        # self.check_ss_feasibility()
         # Construct optimization problem
         self.prob['solver'] = None
         N = self.options['N']
-        self.prob['vars'] = [cas.ssym("b", N + 1, self.sys.order)]
-        V = cas.vec(self.prob['vars'][0])
+        self.prob['vars'] = cas.ssym("b", N + 1, self.sys.order)
+        V = cas.vec(self.prob['vars'])
         self._make_objective()
         self._make_constraints()
 
@@ -389,8 +390,11 @@ class PathFollowing(object):
         solver.setInput(cas.vertcat(self.prob['con'][1]), "lbg")
         solver.setInput(cas.vertcat(self.prob['con'][2]), "ubg")
         solver.setInput([np.inf] * self.sys.order * (N + 1), "ubx")
-        solver.setInput(cas.vertcat(([0] * (N + 1),
-                    (self.sys.order - 1) * (N + 1) * [-np.inf])), "lbx")
+        solver.setInput(
+            cas.vertcat((
+                [0] * (N + 1),
+                (self.sys.order - 1) * (N + 1) * [-np.inf])),
+            "lbx")
 
         solver.solve()
         self.prob['solver'] = solver
@@ -404,32 +408,26 @@ class PathFollowing(object):
         Parse the constraints and put them in the correct format
         """
         N = self.options['N']
-        con = self._ode(self.prob['vars'][0])
+        con = self._ode(self.prob['vars'])
         lb = np.alen(con) * [0]
         ub = np.alen(con) * [0]
         S = self.prob['s']
-        b = self.prob['vars'][0]
+        b = self.prob['vars']
         path, bs = self._make_path()[0:2]
+        sbs = cas.vertcat([self.s[0], bs])
+        Sb = cas.horzcat([S, b]).T
         for f in self.constraints:
             F = cas.substitute(f[0], self.sys.y, path)
             if f[3] is None:
-                F = cas.vertcat([cas.substitute(F,
-                                 cas.vertcat([self.s[0],
-                                 cas.vertcat([bs[i] for i in range(0, bs.numel())])]),
-                                 cas.vertcat([S[j],
-                                 cas.vertcat([b[j, i] for i in range(0, self.sys.order)])]))
-                                 for j in range(0, N + 1)])
-                Flb = [evalf(cas.SXFunction([self.s], [cas.SXMatrix(f[1])]), s).toArray().ravel() for s in S]
-                Fub = [evalf(cas.SXFunction([self.s], [cas.SXMatrix(f[2])]), s).toArray().ravel() for s in S]
+                F = cas.vertcat([cas.substitute(F, sbs, Sb[:, j])
+                                 for j in xrange(N + 1)])
+                Flb = f[1](S) if hasattr(f[1], '__call__') else [f[1]] * len(S)
+                Fub = f[2](S) if hasattr(f[2], '__call__') else [f[2]] * len(S)
                 con.append(F)
                 lb.extend(Flb)
                 ub.extend(Fub)
             else:
-                F = cas.vertcat([cas.substitute(F,
-                                 cas.vertcat([self.s[0],
-                                 [bs[i] for i in range(0, bs.numel())]]),
-                                 cas.vertcat([S[j],
-                                 [b[j, i] for i in range(0, self.sys.order)]]))
+                F = cas.vertcat([cas.substitute(F, sbs, Sb[:, j])
                                  for j in f[3]])
                 con.append(F)
                 lb.extend([f[1]])
@@ -458,9 +456,9 @@ class PathFollowing(object):
         delta = np.diff(self.prob['s'])
         o = []
         for i in range(1, n):
-            f = v[:N, n - 1] / factorial(i)
+            f = v[:N, n - 1] / fact[i]
             for j in range(1, i + 1):
-                f = f * delta + v[:N, n - j - 1] / factorial(i - j)
+                f = f * delta + v[:N, n - j - 1] / fact[i - j]
             f = f - v[1:, n - 1 - i]
             o = cas.vertcat((o, f))
         return o
@@ -503,7 +501,7 @@ class PathFollowing(object):
         """
         order = self.sys.order
         N = self.options['N']
-        b = self.prob['vars'][0]
+        b = self.prob['vars']
         # ds = 1.0/(N+1)
         obj = 2 * sum(np.diff(self.prob['s']) / (cas.sqrt(b[:N, 0]) + cas.sqrt(b[1:, 0])))
         # reg = sum(cas.sqrt((b[1:, order - 1] - b[:N, order - 1]) ** 2))
@@ -513,14 +511,14 @@ class PathFollowing(object):
             path, bs = self._make_path()[0:2]
             # S = np.arange(0, 1, 1.0/(N+1))
             S = self.prob['s']
-            b = self.prob['vars'][0]
+            b = self.prob['vars']
             L = cas.substitute(f, self.sys.y, path)
             L = 2 * sum(cas.vertcat([
-                        cas.substitute(
-                            L,
-                            cas.vertcat([self.s[0], bs]),
-                            cas.vertcat([S[j], b[j, :]])
-                        ) for j in range(1, N + 1)
+                            cas.substitute(
+                                L,
+                                cas.vertcat([self.s[0], bs]),
+                                cas.vertcat([S[j], b[j, :].T])
+                            ) for j in range(1, N + 1)
                         ])
                     * np.diff(self.prob['s']) / (cas.sqrt(b[:N, 0]) + cas.sqrt(b[1:, 0]))
                 )
@@ -550,21 +548,29 @@ class PathFollowing(object):
         x_opt = np.array(solver.getOutput("x")).ravel()
         b_opt = np.reshape(x_opt, (N + 1, -1), order='F')
         self.sol['b'] = b_opt
-        
+
         # Determine time on a sufficiently fine spatial grid
         s0 = np.linspace(0, 1, 1001)
         delta = s0[1] - s0[0]
-        b0_opt = np.hstack([self._eval_b(b_opt, s)[0] for s in s0])
+
+        pieces = [lambda s, b=b_opt, ss=ss, j=j:
+                  sum([bb * (s - ss) ** i / fact[i]
+                       for i, bb in enumerate(b[j])])
+                  for j, ss in enumerate(self.prob['s'][:-1])]
+        conds = lambda s0: [np.logical_and(self.prob['s'][i] <= s0,
+                                           s0 <= self.prob['s'][i+1])
+                            for i in range(N)]
+        b0_opt = np.piecewise(s0, conds(s0), pieces)
         b0_opt[b0_opt < 0] = 0
         time = np.cumsum(np.hstack([0, 2 * delta / (np.sqrt(b0_opt[:-1]) +
-                                                 np.sqrt(b0_opt[1:]))]))
-        
+                                    np.sqrt(b0_opt[1:]))]))
+
         # Resample to constant time-grid
         t = np.arange(time[0], time[-1], self.options['Ts'])
-        # t = np.linspace(time[0], time[-1], self.options['Nt'])
         st = np.interp(t, time, s0)
         # Evaluate solution on equidistant time grid
-        b_opt = np.vstack([self._eval_b(b_opt, s) for s in st])
+        b_opt = np.c_[[np.piecewise(st, conds(st), pieces, b=b_opt[:, i:])
+                       for i in range(self.sys.order)]].T
         st = np.matrix(st)
 
         # Determine s and derivatives from b_opt
@@ -581,14 +587,6 @@ class PathFollowing(object):
         f_val = np.array([evalf(f, s.T).toArray().ravel() for s in s_opt])
         self.sol['states'] = dict([(k, f_val[:, i]) for i, k in
                           enumerate(self.sys.x.keys())])
-
-    def _eval_b(self, b, s):
-        """Evaluate b and its derivatives at an arbitrary point s"""
-        bi = lambda s, s0, b: sum([b[i] * (s - s0) ** (i) / factorial(i) for i in range(len(b))])
-        for i in range(self.options['N']):
-            if self.prob['s'][i] <= s <= self.prob['s'][i + 1]:
-                return np.flipud([bi(s, self.prob['s'][i], b[i, j:]) for j in range(self.sys.order - 1, -1, -1)])
-        return [0] * self.sys.order
 
     def plot(self, p=[['states'], ['constraints']], tikz=False, show=True):
         """Plot states and/or constraints.
