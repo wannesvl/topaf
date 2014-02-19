@@ -33,8 +33,8 @@ P = PathFollowing(S)
 s = P.s[0]
 path = [0.5 * np.pi * s, -np.pi * s]
 P.set_path(path, r2r=True)
-P.set_constraint('tau1', -20, 20)
-P.set_constraint('tau2', -10, 10)
-P.set_options({'Ts': 0.01, 'N': 299, 'reg': 0})
+P.set_constraint(tau1, -20, 20)
+P.set_constraint(tau2, -10, 10)
+P.set_options({'Ts': 0.001, 'N': 4999, 'reg': 0})
 P.solve()
 P.plot([['tau1', 'tau2']])
