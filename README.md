@@ -6,12 +6,12 @@ Installation
 ------------
 
 The software is developed in the Python programming
-language and uses [CasADi](https://github.com/casadi/casadi/wiki) as
+language and uses [CasADi](http://casadi.org) as
 a framework for symbolic computations. Furthermore CasADi provides an
 interface to IPOPT, a software package for
 large-scale nonlinear optimization. For installation instructions
 regarding these software packages, the user is referred to the [CasADi
-homepage](https://github.com/casadi/casadi/wiki). CasADi now offers
+homepage](http://casadi.org). CasADi now offers
 binaries, which simplify the installation procedure considerably.
 
 Run
