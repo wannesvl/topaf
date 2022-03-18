@@ -32,7 +32,7 @@ to install the software systemwide
 
 Dependencies:
     * CasADi and Ipopt are required. Precompiled binaries containing CasADi and
-      Ipopt are available on the CasADi homepage: https://github.com/casadi/casadi
+      Ipopt are available on the CasADi homepage: http://casadi.org/
 
 .. moduleauthor:: Wannes Van Loock <wannes.vanloock@gmail.com>
 """
@@ -40,25 +40,10 @@ Dependencies:
 import casadi as cas
 import numpy as np
 import warnings
-from scipy.misc import factorial, comb
+#from scipy.misc import comb
+from scipy.special import factorial, comb
 
 fact = factorial(range(20))
-
-def evalf(fun, x):
-    '''Evaluate a CasADi function fun at the point x
-
-    Args:
-        fun (SXFunction): Casadi function to evaluate
-        x (double): Evaluation point
-
-    Returns:
-        double. The evaluation of fun
-    '''
-    if not fun.isInit():
-        fun.init()
-    fun.setInput(x)
-    fun.evaluate()
-    return fun.output()
 
 
 class FlatSystem(object):
@@ -71,7 +56,7 @@ class FlatSystem(object):
     Instance variables:
         * order (int): order of the flat system
         * ny (int): number of flat outputs
-        * y (SXMatrix): the flat output and its time derivatives
+        * y (SX): the flat output and its time derivatives
         * x (dict): the states as a function of the flat outputs and its derivatives
 
     Example:
@@ -82,10 +67,10 @@ class FlatSystem(object):
     def __init__(self, ny, order):
         self.order = order
         self.ny = ny
-        self.y = cas.ssym("y", ny, self.order + 1)
+        self.y = cas.SX.sym("y", ny, self.order + 1)
         self.x = dict()
         self._nx = 0
-        self._dy = cas.horzcat([self.y[:, 1:], cas.SXMatrix.zeros(ny, 1)])
+        self._dy = cas.horzcat(self.y[:, 1:], cas.SX.zeros(ny, 1))
 
     def __str__(self):
         return "Flat system of order %s with %s flat outputs" % (self.order, self.ny)
@@ -96,7 +81,7 @@ class FlatSystem(object):
         """Update the dictionary of states with expr
 
         Args:
-            expr (SXMatrix): casadi expression for the state
+            expr (SX): casadi expression for the state
             name (str): Dictionary key to access state. (Default 'xn')
 
         Note: States are stored in the instance variable ``x`` as a dictionary
@@ -122,16 +107,16 @@ class FlatSystem(object):
         df/dt = df/dy * dy/dt
 
         Args:
-            expr (SXMatrix): casadi expression that is differentiated wrt time
+            expr (SX): casadi expression that is differentiated wrt time
 
         Returns:
-            SXMatrix. The time derivative of expr
+            SX. The time derivative of expr
 
         Example:
             >>> S = FlatSystem(2, 4)
             >>> dy00 = S.dt(S.y[0, 0])
         """
-        return cas.mul(cas.jacobian(expr, self.y), self._dy[:])
+        return cas.jtimes(expr, self.y, self._dy)
 
 
 class PathFollowing(object):
@@ -142,9 +127,9 @@ class PathFollowing(object):
 
     Instance variables
         * sys (FlatSystem): associated flat system
-        * s (SXMatrix): The path coordinate and its time derivatives as a
+        * s (SX): The path coordinate and its time derivatives as a
           casadi symbolic object
-        * path (SXMatrix): The path to be followed and its derivatives. Set by
+        * path (SX): The path to be followed and its derivatives. Set by
           function setPath
         * constraints (list): List of tuples of constraints.
           (constrainfunction, lower bound, upper bound)
@@ -173,13 +158,13 @@ class PathFollowing(object):
     """
     def __init__(self, sys):
         self.sys = sys
-        self.s = cas.ssym("s", self.sys.order + 1)
-        self.path = cas.SXMatrix.nan(self.sys.y.shape[0], self.sys.order + 1)
+        self.s = cas.SX.sym("s", self.sys.order + 1)
+        self.path = cas.SX.nan(self.sys.y.shape[0], self.sys.order + 1)
         self.constraints = []
         self.objective = {'Lagrange': [], 'Mayer': []}
         self.options = {
-            'N': 199, 'Ts': 0.01, 'solver': 'Ipopt', 'tol': 1e-6,
-            'max_iter': 100, 'plot': True, 'reg': 1e-20, 'bc': False
+            'N': 199, 'Ts': 0.01, 'solver': 'ipopt', 'solver_options': {'ipopt.tol': 1e-6,
+            'ipopt.max_iter': 100}, 'plot': True, 'reg': 1e-20, 'bc': False
             }
         self.sol = {
             's': [], 't': [], 'states': [], 'inputs': [], 'diagnostics': 0
@@ -203,7 +188,7 @@ class PathFollowing(object):
         Note: The path must be defined as a function of self.s[0].
 
         Args:
-            path (list of SXMatrix): An expression of the geometric path as
+            path (list of SX): An expression of the geometric path as
                 a function of self.s[0]. Its dimension must equal self.sys.ny
             r2r (boolean): Reparameterize path such that a rest to rest
                 transition is performed
@@ -214,22 +199,21 @@ class PathFollowing(object):
             >>> P.set_path([P.s[0], P.s[0]])
         """
         if isinstance(path, list):
-            path = cas.vertcat(path)
+            path = cas.vcat(path)
         if r2r:
             path = cas.substitute(path, self.s[0], self._r2r())
         self.path[:, 0] = path
-        dot_s = cas.vertcat([self.s[1:], 0])
+        dot_s = cas.vcat([self.s[1:], 0])
         for i in range(1, self.sys.order + 1):
-            self.path[:, i] = cas.mul(
-                cas.jacobian(self.path[:, i - 1], self.s), dot_s)
+            self.path[:, i] = cas.jtimes(self.path[:, i - 1], self.s, dot_s)
 
     def _r2r(self):
         """Reparameterization such that the path defines a rest to rest
         transition"""
         degree = 2 * self.sys.order - 1
         bernstein_coeffs = np.hstack((
-            [round(comb(degree, i)) for i in range((degree + 1) / 2)],
-            [0] * ((degree - 1) / 2),
+            [round(comb(degree, i)) for i in range((degree + 1) // 2)],
+            [0] * ((degree - 1) // 2),
             0))
         return sum([bernstein_coeffs[i] * self.s[0] ** (degree - i) *
                     (1 - self.s[0]) ** i for i in range(degree + 1)])
@@ -255,13 +239,13 @@ class PathFollowing(object):
         self.sys.y
 
         Args:
-            expr (SXMatrix): Name of the state or expression as a
+            expr (SX): Name of the state or expression as a
                 function of self.sys.y
 
-            lb (double | SXMatrix): Lower bound for expr,
+            lb (double | SX): Lower bound for expr,
                 either as double of as a function of self.s[0]
 
-            ub (double | SXMatrix): Lower bound for expr,
+            ub (double | SX): Lower bound for expr,
                 either as double of as a function of self.s[0]
 
             pos (list of ints): s coordinates where constraint 
@@ -285,7 +269,7 @@ class PathFollowing(object):
         Note that Mayer terms are not yet supported!
 
         Args:
-            expr (SXMatrix): The casadi expression for the objective terms
+            expr (SX): The casadi expression for the objective terms
             m_or_l (str): 'Mayer' or 'Lagrange'
         """
         self.objective[m_or_l].append(expr)
@@ -336,13 +320,13 @@ class PathFollowing(object):
         """
         for i, f in enumerate(self.constraints):
             F = cas.substitute(f[0], self.sys.y, self.path)
-            F1 = cas.SXFunction([self.s], [F - f[1]])
-            F2 = cas.SXFunction([self.s], [-F + f[2]])
-            F1.init()
-            F2.init()
-            c1 = np.array([evalf(F1, np.hstack([s, [1e-50] * (self.sys.order)])).T
+            F1 = cas.Function('F1',[self.s], [F - f[1]])
+            F2 = cas.Function('F2',[self.s], [-F + f[2]])
+            import ipdb
+            ipdb.set_trace()
+            c1 = np.array([F1(np.hstack([s, [1e-50] * (self.sys.order)])).T
                            for s in self.prob['s']])
-            c2 = np.array([evalf(F2, np.hstack([s, [1e-50] * (self.sys.order)])).T
+            c2 = np.array([F2(np.hstack([s, [1e-50] * (self.sys.order)])).T
                            for s in self.prob['s']])
             if np.any(c1 + tol < 0):
                 warnings.warn("lower bound of constraint %d may be to strict" % i)
@@ -369,35 +353,25 @@ class PathFollowing(object):
         # Construct optimization problem
         self.prob['solver'] = None
         N = self.options['N']
-        self.prob['vars'] = cas.ssym("b", N + 1, self.sys.order)
+        self.prob['vars'] = cas.SX.sym("b", N + 1, self.sys.order)
         V = cas.vec(self.prob['vars'])
         self._make_objective()
         self._make_constraints()
 
-        con = cas.SXFunction([V], [self.prob['con'][0]])
-        obj = cas.SXFunction([V], [self.prob['obj']])
-        if self.options.get('solver') == 'Ipopt':
-            solver = cas.IpoptSolver(obj, con)
-        else:
-            print """Other solver than Ipopt are currently not supported,
-            switching to Ipopt"""
-            solver = cas.IpoptSolver(obj, con)
-        for option, value in self.options.iteritems():
-            if solver.hasOption(option):
-                solver.setOption(option, value)
-        solver.init()
+        nlp = {"x": V, "f": self.prob['obj'], "g": self.prob['con'][0]}
+        solver = cas.nlpsol("solver",self.options.get('solver'),nlp,self.options.get('solver_options'))
         # Setting constraints
-        solver.setInput(cas.vertcat(self.prob['con'][1]), "lbg")
-        solver.setInput(cas.vertcat(self.prob['con'][2]), "ubg")
-        solver.setInput([np.inf] * self.sys.order * (N + 1), "ubx")
-        solver.setInput(
-            cas.vertcat((
+        solver_args = {}
+        solver_args["lbg"] = cas.vcat(self.prob['con'][1])
+        solver_args["ubg"] = cas.vcat(self.prob['con'][2])
+        solver_args["ubx"] = [np.inf] * self.sys.order * (N + 1)
+        solver_args["lbx"] = cas.vcat((
                 [0] * (N + 1),
-                (self.sys.order - 1) * (N + 1) * [-np.inf])),
-            "lbx")
+                (self.sys.order - 1) * (N + 1) * [-np.inf]))
 
-        solver.solve()
+        sol = solver(**solver_args)
         self.prob['solver'] = solver
+        self.prob['sol'] = sol
         self._get_solution()
 
     # ========================================================================
@@ -409,27 +383,27 @@ class PathFollowing(object):
         """
         N = self.options['N']
         con = self._ode(self.prob['vars'])
-        lb = np.alen(con) * [0]
-        ub = np.alen(con) * [0]
+        lb = con.numel() * [0]
+        ub = con.numel() * [0]
         S = self.prob['s']
         b = self.prob['vars']
         path, bs = self._make_path()[0:2]
-        sbs = cas.vertcat([self.s[0], bs])
-        Sb = cas.horzcat([S, b]).T
+        sbs = cas.vcat([self.s[0], bs])
+        Sb = cas.hcat([S, b]).T
         for f in self.constraints:
             F = cas.substitute(f[0], self.sys.y, path)
             if f[3] is None:
-                F = cas.vertcat([cas.substitute(F, sbs, Sb[:, j])
-                                 for j in xrange(N + 1)])
+                F = cas.vcat([cas.substitute(F, sbs, Sb[:, j])
+                                 for j in range(N + 1)])
                 Flb = f[1](S) if hasattr(f[1], '__call__') else [f[1]] * len(S)
                 Fub = f[2](S) if hasattr(f[2], '__call__') else [f[2]] * len(S)
-                con.append(F)
+                con = cas.vertcat(con,F)
                 lb.extend(Flb)
                 ub.extend(Fub)
             else:
-                F = cas.vertcat([cas.substitute(F, sbs, Sb[:, j])
+                F = cas.vcat([cas.substitute(F, sbs, Sb[:, j])
                                  for j in f[3]])
-                con.append(F)
+                con = cas.vertcat(con,F)
                 lb.extend([f[1]])
                 ub.extend([f[2]])
         if self.options['bc']:
@@ -445,10 +419,10 @@ class PathFollowing(object):
         """Define ode for linear brunovsky system
 
         Args:
-            v (SXMatrix): The variables for the ode
+            v (SX): The variables for the ode
 
         Returns:
-            SXMatrix. The ode for the optimal control problem
+            SX. The ode for the optimal control problem
         """
         n = v.size2()
         N = self.options['N']
@@ -460,7 +434,7 @@ class PathFollowing(object):
             for j in range(1, i + 1):
                 f = f * delta + v[:N, n - j - 1] / fact[i - j]
             f = f - v[1:, n - 1 - i]
-            o = cas.vertcat((o, f))
+            o = cas.vcat((o, f))
         return o
 
     def _make_path(self):
@@ -471,18 +445,18 @@ class PathFollowing(object):
         repeatedly applying the chainrule
 
         Returns:
-            * SXMatrix. The substituted path
-            * SXMatrix. b and the path derivatives
-            * SXMatrix. The derivatives of s as a function of b
+            * SX. The substituted path
+            * SX. b and the path derivatives
+            * SX. The derivatives of s as a function of b
         """
-        b = cas.ssym("b", self.sys.order)
-        db = cas.vertcat((b[1:], 0))
-        Ds = cas.SXMatrix.nan(self.sys.order)  # Time derivatives of s
+        b = cas.SX.sym("b", self.sys.order)
+        db = cas.vcat((b[1:], 0))
+        Ds = cas.SX.nan(self.sys.order)  # Time derivatives of s
         Ds[0] = cas.sqrt(b[0])
         Ds[1] = b[1] / 2
         # Apply chainrule for finding higher order derivatives
         for i in range(1, self.sys.order - 1):
-            Ds[i + 1] = (cas.mul(cas.jacobian(Ds[i], b), db) * self.s[1] +
+            Ds[i + 1] = (cas.jtimes(Ds[i], b, db) * self.s[1] +
                        cas.jacobian(Ds[i], self.s[1]) * Ds[1])
         Ds = cas.substitute(Ds, self.s[1], cas.sqrt(b[0]))
         return cas.substitute(self.path, self.s[1:], Ds), b, Ds
@@ -503,9 +477,9 @@ class PathFollowing(object):
         N = self.options['N']
         b = self.prob['vars']
         # ds = 1.0/(N+1)
-        obj = 2 * sum(np.diff(self.prob['s']) / (cas.sqrt(b[:N, 0]) + cas.sqrt(b[1:, 0])))
+        obj = 2 * cas.sum1(np.diff(self.prob['s']) / (cas.sqrt(b[:N, 0]) + cas.sqrt(b[1:, 0])))
         # reg = sum(cas.sqrt((b[1:, order - 1] - b[:N, order - 1]) ** 2))
-        reg = sum((b[2:, order - 1] - 2 * b[1:N, order - 1] +
+        reg = cas.sum1((b[2:, order - 1] - 2 * b[1:N, order - 1] +
                     b[:(N - 1), order - 1]) ** 2)
         for f in self.objective['Lagrange']:
             path, bs = self._make_path()[0:2]
@@ -513,18 +487,18 @@ class PathFollowing(object):
             S = self.prob['s']
             b = self.prob['vars']
             L = cas.substitute(f, self.sys.y, path)
-            L = 2 * sum(cas.vertcat([
+            L = 2 * sum(cas.vcat([
                             cas.substitute(
                                 L,
-                                cas.vertcat([self.s[0], bs]),
-                                cas.vertcat([S[j], b[j, :].T])
+                                cas.vcat([self.s[0], bs]),
+                                cas.vcat([S[j], b[j, :].T])
                             ) for j in range(1, N + 1)
                         ])
                     * np.diff(self.prob['s']) / (cas.sqrt(b[:N, 0]) + cas.sqrt(b[1:, 0]))
                 )
-            # L = sum(cas.vertcat([cas.substitute(L, cas.vertcat([self.s[0],
+            # L = sum(cas.vcat([cas.substitute(L, cas.vcat([self.s[0],
             #     [bs[i] for i in range(0, bs.numel())]]),
-            #     cas.vertcat([S[j], [b[j, i] for i in range(0, self.sys.order)]]))
+            #     cas.vcat([S[j], [b[j, i] for i in range(0, self.sys.order)]]))
             #     for j in range(0, N + 1)]))
             obj = obj + L
         self.prob['obj'] = obj + self.options['reg'] * reg
@@ -544,8 +518,9 @@ class PathFollowing(object):
         TODO: Do exact interpolation
         """
         solver = self.prob['solver']
+        sol = self.prob["sol"]
         N = self.options['N']
-        x_opt = np.array(solver.getOutput("x")).ravel()
+        x_opt = np.array(sol["x"]).ravel()
         b_opt = np.reshape(x_opt, (N + 1, -1), order='F')
         self.sol['b'] = b_opt
 
@@ -575,16 +550,15 @@ class PathFollowing(object):
 
         # Determine s and derivatives from b_opt
         b, Ds = self._make_path()[1:]
-        Ds_f = cas.SXFunction([b], [Ds])  # derivatives of s wrt b
-        Ds_f.init()
-        s_opt = np.hstack((st.T, np.array([evalf(Ds_f, bb).toArray().ravel()
+        Ds_f = cas.Function('Ds',[b], [Ds])  # derivatives of s wrt b
+        s_opt = np.hstack((st.T, np.array([np.array(Ds_f(bb)).ravel()
                                           for bb in b_opt])))
         self.sol['s'] = np.asarray(s_opt)
         self.sol['t'] = t
         # Evaluate the states
-        f = cas.SXFunction([self.s], [cas.substitute(cas.vertcat(self.sys.x.values()),
+        f = cas.Function('f',[self.s], [cas.substitute(cas.vcat(self.sys.x.values()),
                                            self.sys.y, self.path)])
-        f_val = np.array([evalf(f, s.T).toArray().ravel() for s in s_opt])
+        f_val = np.array([np.array(f(s.T)).ravel() for s in s_opt])
         self.sol['states'] = dict([(k, f_val[:, i]) for i, k in
                           enumerate(self.sys.x.keys())])
 
@@ -631,15 +605,14 @@ class PathFollowing(object):
                 elif l == 'constraints':
                     for i, f in enumerate(self.constraints):
                         F = cas.substitute(f[0], self.sys.y, self.path)
-                        F = cas.SXFunction([self.s], [F])
-                        F.init()
-                        Flb = cas.SXFunction([self.s], [f[1]])
-                        Fub = cas.SXFunction([self.s], [f[2]])
-                        c = np.array([evalf(F, s.T).toArray().ravel()
+                        F = cas.Function('F',[self.s], [F])
+                        Flb = cas.Function('Flb',[self.s], [f[1]])
+                        Fub = cas.Function('Fub',[self.s], [f[2]])
+                        c = np.array([np.array(F(s.T)).ravel()
                                                for s in self.sol['s']])
-                        cub = np.array([evalf(Fub, s.T).toArray().ravel()
+                        cub = np.array([np.array(Fub(s.T)).ravel()
                                                for s in self.sol['s']])
-                        clb = np.array([evalf(Flb, s.T).toArray().ravel()
+                        clb = np.array([np.array(Flb(s.T)).ravel()
                                                for s in self.sol['s']])
                         ax = fig.add_subplot(m / int(np.sqrt(m)) + np.mod(m, 2),
                                              int(np.sqrt(m)), j)
@@ -648,11 +621,10 @@ class PathFollowing(object):
                         ax.plot(self.sol['t'], cub, color='black')
                         j += 1
                 elif isinstance(l, tuple):
-                    if isinstance(l[1], cas.SXMatrix):
+                    if isinstance(l[1], cas.SX):
                         F = cas.substitute(l[1], self.sys.y, self.path)
-                        F = cas.SXFunction([self.s], [F])
-                        F.init()
-                        c = np.array([evalf(F, s.T).toArray().ravel()
+                        F = cas.Function('F',[self.s], [F])
+                        c = np.array([np.array(F(s.T)).ravel()
                                                for s in self.sol['s']])
                         ax = fig.add_subplot(m / int(np.sqrt(m)) + np.mod(m, 2),
                                              int(np.sqrt(m)), j)
@@ -665,11 +637,10 @@ class PathFollowing(object):
                         plt.xlabel('time')
                     j += 1
                 else:
-                    if isinstance(l, cas.SXMatrix):
+                    if isinstance(l, cas.SX):
                         F = cas.substitute(l, self.sys.y, self.path)
-                        F = cas.SXFunction([self.s], [F])
-                        F.init()
-                        c = np.array([evalf(F, s.T).toArray().ravel()
+                        F = cas.Function('F',[self.s], [F])
+                        c = np.array([np.array(F(s.T)).ravel()
                                                for s in self.sol['s']])
                         ax = fig.add_subplot(m / int(np.sqrt(m)) + np.mod(m, 2),
                                              int(np.sqrt(m)), j)

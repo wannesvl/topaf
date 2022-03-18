@@ -17,6 +17,9 @@ setup(
     url="https://github.com/wannesvl/topaf",
     packages=['pathfollowing'],
     long_description=read('README'),
+    install_requires=[
+      'casadi','scipy'
+    ],
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Science/Research",
